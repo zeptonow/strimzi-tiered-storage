@@ -124,9 +124,57 @@ class DiskChunkCacheConfigTest {
                 + baseDir + " must exists and be a writable directory");
     }
 
+    @Test
+    void createsMissingBaseDir() {
+        final var missing = path.resolve("tiered-chunk-cache");
+        assertThat(missing).doesNotExist();
+
+        final var config = new DiskChunkCacheConfig(
+            Map.of(
+                "size", "-1",
+                "path", missing.toString()
+            )
+        );
+        assertThat(config.baseCachePath()).isEqualTo(missing).isDirectory().isWritable();
+        assertThat(config.cachePath()).isEmptyDirectory();
+        assertThat(config.tempCachePath()).isEmptyDirectory();
+    }
+
+    @Test
+    void missingParentIsNotCreated() {
+        // A missing parent usually means a wrong path or an unmounted volume: fail instead of
+        // creating it, which could put the cache on the wrong disk.
+        final var missing = path.resolve("not-mounted").resolve("tiered-chunk-cache");
+        assertThatThrownBy(() -> new DiskChunkCacheConfig(
+            Map.of(
+                "size", "-1",
+                "path", missing.toString()
+            )))
+            .isInstanceOf(ConfigException.class)
+            .hasMessageStartingWith("Invalid value " + missing + " for configuration path: "
+                + missing + " does not exist and could not be created, reason: "
+                + "java.nio.file.NoSuchFileException");
+        assertThat(missing.getParent()).doesNotExist();
+    }
+
+    @Test
+    void missingBaseDirInReadOnlyParent() throws IOException {
+        final var readOnlyParent = Files.createTempDirectory(
+            "path", PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("r-xr-xr-x")));
+        final var missing = readOnlyParent.resolve("tiered-chunk-cache");
+        assertThatThrownBy(() -> new DiskChunkCacheConfig(
+            Map.of(
+                "size", "-1",
+                "path", missing.toString()
+            )))
+            .isInstanceOf(ConfigException.class)
+            .hasMessageStartingWith("Invalid value " + missing + " for configuration path: "
+                + missing + " does not exist and could not be created, reason: "
+                + "java.nio.file.AccessDeniedException");
+    }
+
     public static Stream<Arguments> invalidBaseDirs() throws IOException {
         return Stream.of(
-            arguments(Named.of("non-existing directory", new File("non-existing"))),
             arguments(Named.of(
                 "read-only directory",
                 Files.createTempDirectory(

@@ -17,6 +17,7 @@
 package io.aiven.kafka.tieredstorage.config;
 
 import java.io.IOException;
+import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Map;
@@ -29,7 +30,8 @@ import org.apache.commons.io.FileUtils;
 public class DiskChunkCacheConfig extends ChunkCacheConfig {
     private static final String CACHE_PATH_CONFIG = "path";
     private static final String CACHE_PATH_DOC = "Cache base directory. "
-        + "It is required to exist and be writable prior to the execution of the plugin.";
+        + "If it does not exist, the plugin creates it, as long as its parent directory exists. "
+        + "It must be writable by the broker.";
 
     public static final String TEMP_CACHE_DIRECTORY = "temp";
     public static final String CACHE_DIRECTORY = "cache";
@@ -50,6 +52,7 @@ public class DiskChunkCacheConfig extends ChunkCacheConfig {
     public DiskChunkCacheConfig(final Map<String, ?> props) {
         super(configDef(), props);
         final var baseCachePath = baseCachePath();
+        createBaseCacheDirectoryIfMissing();
         if (!Files.isDirectory(baseCachePath) || !Files.isWritable(baseCachePath)) {
             throw new ConfigException(CACHE_PATH_CONFIG, baseCachePath,
                 baseCachePath + " must exists and be a writable directory");
@@ -57,6 +60,30 @@ public class DiskChunkCacheConfig extends ChunkCacheConfig {
         // Cleaning the cache directory since there is no way so far
         // to reuse previously cached files after broker restart.
         resetCacheDirectory();
+    }
+
+    /**
+     * Creates the base cache directory if it is missing, as the broker's own user, so the broker can
+     * write to it. Without this, a cache directory on a new disk has to be created by hand (or by
+     * something running as another user, which can leave it unwritable) before the broker starts.
+     *
+     * <p>Only the last path element is created: a missing parent usually means a wrong path or a
+     * volume that is not mounted, and silently creating it would put the cache on the wrong disk.
+     */
+    private void createBaseCacheDirectoryIfMissing() {
+        final var baseCachePath = baseCachePath();
+        if (Files.exists(baseCachePath)) {
+            return;
+        }
+        try {
+            Files.createDirectory(baseCachePath);
+        } catch (final FileAlreadyExistsException e) {
+            // Created concurrently; the checks that follow validate it.
+        } catch (final IOException e) {
+            // printing e.toString instead of e.getMessage as some message have no context without exception type
+            throw new ConfigException(CACHE_PATH_CONFIG, baseCachePath,
+                baseCachePath + " does not exist and could not be created, reason: " + e);
+        }
     }
 
     private void resetCacheDirectory() {
