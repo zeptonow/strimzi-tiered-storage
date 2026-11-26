@@ -292,7 +292,7 @@ DiskChunkCacheConfig
 Under ``fetch.chunk.cache.``
 
 ``path``
-  Cache base directory. It is required to exist and be writable prior to the execution of the plugin.
+  Cache base directory. If it does not exist, the plugin creates it, as long as its parent directory exists. It must be writable by the broker.
 
   * Type: string
   * Importance: high
